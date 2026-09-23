@@ -49,10 +49,7 @@ var _ = Describe("CPU slicing", func() {
 			sysdconn.GetUnitTypePropertyContext(ctx, InitScopeUnit, AllowedCPUsType, AllowedCPUsProperty))
 		allowedCPUs := AssignableTo[[]uint8](allowedCPUsProp.Value.Value())
 		Expect(cpus.SystemDbusSet(allowedCPUs)).NotTo(BeEmpty())
-		DeferCleanup(func(ctx context.Context) {
-			Expect(sysdconn.SetUnitPropertiesContext(ctx,
-				InitScopeUnit, true, *allowedCPUsProp)).To(Succeed())
-		})
+		DeferCleanup(sysdconn.SetUnitPropertiesContext, InitScopeUnit, true, *allowedCPUsProp)
 	})
 
 })
