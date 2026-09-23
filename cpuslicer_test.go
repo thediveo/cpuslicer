@@ -16,8 +16,10 @@ package cpuslicer
 
 import (
 	"context"
+	"time"
 
 	"github.com/coreos/go-systemd/v22/dbus"
+	godbus "github.com/godbus/dbus/v5"
 	"github.com/thediveo/cpus"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -50,6 +52,25 @@ var _ = Describe("CPU slicing", func() {
 		allowedCPUs := AssignableTo[[]uint8](allowedCPUsProp.Value.Value())
 		Expect(cpus.SystemDbusSet(allowedCPUs)).NotTo(BeEmpty())
 		DeferCleanup(sysdconn.SetUnitPropertiesContext, InitScopeUnit, true, *allowedCPUsProp)
+
+		// Take the list of CPUs currently online and set the logical CPU with
+		// the highest number apart and then tell süstemdüh to take its dirty
+		// paws of that CPU.
+		isolCPU, sysdCPUs := Remove(cpus.Online())
+		Expect(isolCPU).NotTo(BeZero())
+		Expect(sysdCPUs).NotTo(BeEmpty())
+		By("restricting systemd to CPUs " + sysdCPUs.String())
+		Expect(sysdconn.SetUnitPropertiesContext(ctx,
+			InitScopeUnit, true, dbus.Property{Name: allowedCPUsProp.Name, Value: godbus.MakeVariant(sysdCPUs.SystemdDbusBytes())})).To(Succeed())
+
+		// Cross-check that PID1 has been moved off the CPU we've taken apart.
+		Eventually(cpus.Affinity).WithArguments(1).Within(5 * time.Second).ProbeEvery(100 * time.Millisecond).
+			To(Equal(sysdCPUs))
 	})
 
 })
+
+func Remove(list cpus.List) (uint, cpus.Set) {
+	last := list[len(list)-1][1]
+	return last, list.Set().Overlap(cpus.Set{}.AddRange(0, last-1))
+}

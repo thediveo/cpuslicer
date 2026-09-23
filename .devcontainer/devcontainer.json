@@ -24,6 +24,9 @@
         },
         "ghcr.io/thediveo/devcontainer-features/pinact:0": {}
     },
+    "runArgs": [
+        "--pid=host"
+    ],
     "mounts": [
         "type=bind,source=/run/systemd/private,target=/run/systemd/private"
     ],
