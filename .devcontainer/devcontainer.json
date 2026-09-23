@@ -24,9 +24,13 @@
         },
         "ghcr.io/thediveo/devcontainer-features/pinact:0": {}
     },
+    "mounts": [
+        "type=bind,source=/run/systemd/private,target=/run/systemd/private"
+    ],
     "remoteEnv": {
         "GOPATH": "/home/vscode/go",
-        "PATH": "/home/vscode/go/bin:/go/bin:/usr/local/go/bin:${localEnv:PATH}"
+        "PATH": "/home/vscode/go/bin:/go/bin:/usr/local/go/bin:${localEnv:PATH}",
+        "DBUS_SYSTEM_BUS_ADDRESS": "unix:path=/run/dbus/system_bus_socket"
     },
     "customizations": {
         "vscode": {

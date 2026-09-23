@@ -13,9 +13,3 @@
 // under the License.
 
 package cpuslicer
-
-import (
-	"github.com/godbus/dbus/v5"
-)
-
-var _ = dbus.Foo
