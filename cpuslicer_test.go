@@ -28,13 +28,33 @@ import (
 	. "github.com/thediveo/success"
 )
 
-var _ = Describe("CPU slicing", func() {
+var _ = Describe("CPU slicing", Ordered, func() {
 
-	It("excludes the last logical CPU from systemd's own usage", func(ctx context.Context) {
+	BeforeAll(func() {
 		if os.Getuid() != 0 {
 			Skip("needs root")
 		}
+	})
 
+	When("retrieving the CPU affinities of a unit", func() {
+
+		It("reports failure to access the AllowedCPUs property", func(ctx context.Context) {
+			sdconn := Successful(sddbus.NewSystemdConnectionContext(context.Background()))
+			DeferCleanup(sdconn.Close)
+			Expect(UnitAllowedCPUs(ctx, sdconn, "/foobar.shkope")).Error().To(
+				MatchError(ContainSubstring("Unit name /foobar.shkope is neither")))
+		})
+
+		It("returns the CPU affinities", func(ctx context.Context) {
+			sdconn := Successful(sddbus.NewSystemdConnectionContext(context.Background()))
+			DeferCleanup(sdconn.Close)
+			allowedCPUs := Successful(UnitAllowedCPUs(ctx, sdconn, "init.scope"))
+			Expect(allowedCPUs).NotTo(BeEmpty())
+		})
+
+	})
+
+	It("excludes the last logical CPU from systemd's own usage", func(ctx context.Context) {
 		const (
 			InitScopeUnit       = "init.scope"
 			AllowedCPUsProperty = "AllowedCPUs"
@@ -57,7 +77,8 @@ var _ = Describe("CPU slicing", func() {
 		allowedCPUsProp := Successful(
 			sdconn.GetUnitTypePropertyContext(ctx, InitScopeUnit, AllowedCPUsType, AllowedCPUsProperty))
 		allowedCPUs := AssignableTo[[]uint8](allowedCPUsProp.Value.Value())
-		Expect(cpus.SystemDbusSet(allowedCPUs)).NotTo(BeEmpty())
+		// nota bene: an empty CPU set means that all currently online CPUs are
+		// allowed.
 		DeferCleanup(func(ctx context.Context) {
 			By("restoring systemd's CPU affinities to " + cpus.SystemDbusSet(allowedCPUs).String())
 			Expect(sdconn.SetUnitPropertiesContext(ctx, InitScopeUnit, true, *allowedCPUsProp)).To(Succeed())

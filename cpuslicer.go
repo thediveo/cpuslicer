@@ -13,3 +13,33 @@
 // under the License.
 
 package cpuslicer
+
+import (
+	"context"
+	"fmt"
+
+	sddbus "github.com/coreos/go-systemd/v22/dbus"
+	"github.com/thediveo/cpus"
+)
+
+const (
+	AllowedCPUsProperty = "AllowedCPUs"
+	AllowedCPUsType     = "Scope"
+)
+
+func UnitAllowedCPUs(ctx context.Context, sdconn *sddbus.Conn, unit string) (cpus.Set, error) {
+	allowedCPUsProp, err := sdconn.GetUnitTypePropertyContext(ctx,
+		unit, AllowedCPUsType, AllowedCPUsProperty)
+	if err != nil {
+		return nil, err
+	}
+	allowedCPUsValue, ok := allowedCPUsProp.Value.Value().([]uint8)
+	if !ok {
+		return nil, fmt.Errorf("expected []uint8, got %T", allowedCPUsProp.Value.Value())
+	}
+	allowedCPUs := cpus.SystemDbusSet(allowedCPUsValue)
+	if len(allowedCPUs) == 0 {
+		return cpus.Online().Set(), nil
+	}
+	return allowedCPUs, nil
+}
