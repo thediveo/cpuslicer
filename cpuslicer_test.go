@@ -16,10 +16,11 @@ package cpuslicer
 
 import (
 	"context"
+	"os"
 	"time"
 
-	"github.com/coreos/go-systemd/v22/dbus"
-	godbus "github.com/godbus/dbus/v5"
+	sddbus "github.com/coreos/go-systemd/v22/dbus"
+	"github.com/godbus/dbus/v5"
 	"github.com/thediveo/cpus"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -30,12 +31,17 @@ import (
 var _ = Describe("CPU slicing", func() {
 
 	It("excludes the last logical CPU from systemd's own usage", func(ctx context.Context) {
+		if os.Getuid() != 0 {
+			Skip("needs root")
+		}
+
 		const (
 			InitScopeUnit       = "init.scope"
 			AllowedCPUsProperty = "AllowedCPUs"
 			AllowedCPUsType     = "Scope"
 		)
 
+		By("connecting directly to systemd's private API endpoint")
 		// Globbits! dbus.NewSystemdConnection is deprecated and
 		// dbus.NewSystemdConnectionContext does not use the passed context for
 		// controlling dialing but for controlling the lifetime of the
@@ -44,24 +50,29 @@ var _ = Describe("CPU slicing", func() {
 		// And the ProbLLMs can't correctly analyse the static flow but instead
 		// immediately stop dead with the result "context aint used in dialing
 		// so no problem here".
-		sysdconn := Successful(dbus.NewSystemdConnectionContext(context.Background()))
-		DeferCleanup(sysdconn.Close)
+		sdconn := Successful(sddbus.NewSystemdConnectionContext(context.Background()))
+		DeferCleanup(sdconn.Close)
 
+		By("retrieving systemd's current CPU affinities")
 		allowedCPUsProp := Successful(
-			sysdconn.GetUnitTypePropertyContext(ctx, InitScopeUnit, AllowedCPUsType, AllowedCPUsProperty))
+			sdconn.GetUnitTypePropertyContext(ctx, InitScopeUnit, AllowedCPUsType, AllowedCPUsProperty))
 		allowedCPUs := AssignableTo[[]uint8](allowedCPUsProp.Value.Value())
 		Expect(cpus.SystemDbusSet(allowedCPUs)).NotTo(BeEmpty())
-		DeferCleanup(sysdconn.SetUnitPropertiesContext, InitScopeUnit, true, *allowedCPUsProp)
+		DeferCleanup(func(ctx context.Context) {
+			By("restoring systemd's CPU affinities to " + cpus.SystemDbusSet(allowedCPUs).String())
+			Expect(sdconn.SetUnitPropertiesContext(ctx, InitScopeUnit, true, *allowedCPUsProp)).To(Succeed())
+		})
 
 		// Take the list of CPUs currently online and set the logical CPU with
 		// the highest number apart and then tell süstemdüh to take its dirty
 		// paws of that CPU.
-		isolCPU, sysdCPUs := Remove(cpus.Online())
+		isolCPU, sysdCPUs := Allright2R(cpus.Online().Set().LastOk())
 		Expect(isolCPU).NotTo(BeZero())
 		Expect(sysdCPUs).NotTo(BeEmpty())
+
 		By("restricting systemd to CPUs " + sysdCPUs.String())
-		Expect(sysdconn.SetUnitPropertiesContext(ctx,
-			InitScopeUnit, true, dbus.Property{Name: allowedCPUsProp.Name, Value: godbus.MakeVariant(sysdCPUs.SystemdDbusBytes())})).To(Succeed())
+		Expect(sdconn.SetUnitPropertiesContext(ctx,
+			InitScopeUnit, true, sddbus.Property{Name: allowedCPUsProp.Name, Value: dbus.MakeVariant(sysdCPUs.SystemdDbusBytes())})).To(Succeed())
 
 		// Cross-check that PID1 has been moved off the CPU we've taken apart.
 		Eventually(cpus.Affinity).WithArguments(1).Within(5 * time.Second).ProbeEvery(100 * time.Millisecond).
@@ -69,8 +80,3 @@ var _ = Describe("CPU slicing", func() {
 	})
 
 })
-
-func Remove(list cpus.List) (uint, cpus.Set) {
-	last := list[len(list)-1][1]
-	return last, list.Set().Overlap(cpus.Set{}.AddRange(0, last-1))
-}
